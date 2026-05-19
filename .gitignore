@@ -28,3 +28,7 @@ test_output/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# Agent运行临时文件
+model_responses/
+tmp*.ai.py
