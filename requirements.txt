@@ -1,0 +1,4 @@
+sqlcipher3
+zstandard
+python-docx
+rapidocr-onnxruntime
