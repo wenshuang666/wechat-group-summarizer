@@ -19,29 +19,38 @@ except ImportError:
     HAS_ZSTD = False
 
 # ============ 配置 ============
-# 微信数据目录：请修改为你的实际路径
+# 微信数据目录：请修改为你的实际路径，或通过环境变量 WECHAT_DB_DIR 设置
 # 格式: <XWeChat数据根目录>\db_storage
 # 示例: r'C:\Users\<用户名>\Documents\xwechat_files\<wxid>_<hash>\db_storage'
 DATA_DIR = os.environ.get('WECHAT_DB_DIR', r'PLEASE_SET_YOUR_DB_DIR')
-KEYS_FILE = os.path.join(os.path.dirname(__file__), "wechat_keys.json")
-GROUP_MAP_FILE = os.path.join(os.path.dirname(__file__), "plan_wechat_summary", "group_map.json")
+KEYS_FILE = os.environ.get('WECHAT_KEYS_FILE', os.path.join(os.path.dirname(__file__), "wechat_keys.json"))
 
-# 已知表到群聊的映射（通过消息内容确认）
-KNOWN_TABLE_MAP = {
-    "Msg_e765e0397c9e67788aa23dcd5b3e19ba": "GenericAgent体验交流群16",
-    "Msg_64f9f8ed137f012d29cd298cf20184e7": "人工智能23-2班",  # 校园卡/操场/主楼
-}
+# 可选：群聊名称映射文件（如果存在则加载，否则自动发现）
+GROUP_MAP_FILE = os.environ.get('WECHAT_GROUP_MAP', os.path.join(os.path.dirname(__file__), "group_map.json"))
+
 
 class WeChatDBReader:
     """微信数据库读取器"""
     
     def __init__(self):
+        if not os.path.exists(KEYS_FILE):
+            raise FileNotFoundError(
+                f"密钥文件不存在: {KEYS_FILE}\n"
+                f"请先配置 WECHAT_KEYS_FILE 环境变量，或创建 wechat_keys.json\n"
+                f"GA 用户可运行 SOP: ga_sop/wechat_summary_setup.md"
+            )
+        
         with open(KEYS_FILE, "r", encoding="utf-8") as f:
             self.keys = json.load(f)
         
-        # 加载群聊名称映射
-        with open(GROUP_MAP_FILE, "r", encoding="utf-8") as f:
-            self.group_map = json.load(f)
+        # 加载群聊名称映射（可选）
+        self.group_map = {}
+        if os.path.exists(GROUP_MAP_FILE):
+            try:
+                with open(GROUP_MAP_FILE, "r", encoding="utf-8") as f:
+                    self.group_map = json.load(f)
+            except Exception as e:
+                print(f"[WARN] 加载群聊映射失败: {e}")
         
         self._msg_conn = None
         self._contact_conn = None
@@ -199,6 +208,63 @@ class WeChatDBReader:
         except Exception:
             return text[:500]
     
+    def discover_groups(self) -> Dict[str, str]:
+        """
+        自动发现所有群聊表，通过读取表内消息特征识别群聊名称。
+        返回: {表名: 群聊名称(或表名fallback)}
+        """
+        conn = self._get_msg_conn()
+        tables = self.get_msg_tables()
+        discovered = {}
+        
+        for table in tables:
+            try:
+                # 读取最新消息，尝试从 XML 中提取群聊名称
+                cur = conn.execute(
+                    f"SELECT message_content, local_type FROM {table} "
+                    f"WHERE message_content IS NOT NULL "
+                    f"ORDER BY local_id DESC LIMIT 5"
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    continue
+                
+                # 检查是否像群聊表（有多人发言特征）
+                sender_patterns = set()
+                group_name = None
+                
+                for raw, msg_type in rows:
+                    decoded = self._decode_content(raw, msg_type)
+                    if decoded and '<sender>' in decoded:
+                        # 旧格式可能包含 sender 信息
+                        pass
+                    
+                    # 从 XML 中提取 title（通常是群聊名或文件标题）
+                    if isinstance(raw, bytes):
+                        try:
+                            text = raw.decode('utf-8', errors='ignore')
+                            # 查找 <chatname> 或群聊相关标签
+                            m = re.search(r'<chatname>(?:<!\[CDATA\[)?(.*?)(?:\]\])?</chatname>', text)
+                            if m and m.group(1).strip():
+                                group_name = m.group(1).strip()
+                        except:
+                            pass
+                
+                # 如果有 group_map 映射，优先使用
+                if table in self.group_map:
+                    discovered[table] = self.group_map[table]
+                elif group_name:
+                    discovered[table] = group_name
+                else:
+                    # 用表名作为 fallback
+                    discovered[table] = table
+                    
+            except Exception as e:
+                print(f"[WARN] 扫描表 {table} 失败: {e}")
+                continue
+        
+        return discovered
+    
     def get_group_messages(self, group_name: str, limit: int = 100, 
                            include_system: bool = False) -> List[Dict]:
         """
@@ -210,18 +276,20 @@ class WeChatDBReader:
         """
         conn = self._get_msg_conn()
         
-        # 核心查找：通过 group_map -> chatroom_id -> MD5 -> 表名
+        # 1. 尝试从 group_map 查找
         target_table = self._get_table_by_group_name(group_name)
         
+        # 2. 如果找不到，尝试自动发现
         if not target_table:
-            # fallback：尝试 KNOWN_TABLE_MAP（旧兼容）
-            for table, known_name in KNOWN_TABLE_MAP.items():
-                if group_name.lower() in known_name.lower() or known_name.lower() in group_name.lower():
+            discovered = self.discover_groups()
+            for table, name in discovered.items():
+                if group_name.lower() in name.lower() or name.lower() in group_name.lower():
                     target_table = table
                     break
         
         if not target_table:
             print(f"[WARN] 找不到群聊 '{group_name}' 对应的消息表")
+            print(f"[TIP] 可用群聊: {', '.join(self.list_groups())}")
             return []
         
         # 读取目标表的消息
@@ -255,8 +323,11 @@ class WeChatDBReader:
         return msgs
     
     def list_groups(self) -> List[str]:
-        """列出所有群聊名称"""
-        return list(self.group_map.values())
+        """列出所有群聊名称。优先使用 group_map，否则自动发现。"""
+        if self.group_map:
+            return list(self.group_map.values())
+        discovered = self.discover_groups()
+        return list(discovered.values()) if discovered else list(discovered.keys())
     
     def close(self):
         if self._msg_conn:
@@ -348,20 +419,18 @@ def get_group_summary_text(group_name: str, limit: int = 100,
 if __name__ == "__main__":
     reader = WeChatDBReader()
     
-    print("=== 群聊列表 ===")
-    groups = reader.list_groups()
-    for g in groups[:10]:
-        print(f"  📢 {g}")
-    
-    print("\n=== 测试 GenericAgent体验交流群16 ===")
+    print("=== 群聊列表（自动发现） ===")
     try:
-        msgs = reader.get_group_messages("GenericAgent体验交流群16", limit=10)
-        print(f"读取到 {len(msgs)} 条消息")
-        for m in msgs[:5]:
-            print(f"  [{m['time']}] {m['content'][:60]}")
+        groups = reader.list_groups()
+        for g in groups[:10]:
+            print(f"  📢 {g}")
     except Exception as e:
-        print(f"错误: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"[WARN] 读取群聊列表失败: {e}")
+    
+    print("\n=== 使用说明 ===")
+    print("  1. 请先设置环境变量 WECHAT_DB_DIR 指向 db_storage 目录")
+    print("  2. 准备 wechat_keys.json 文件（可通过 GA SOP 自动提取）")
+    print("  3. 调用 reader.get_group_messages('群聊名称', limit=100)")
+    print("  4. 或用 GA 运行 ga_sop/wechat_summary_setup.md 自动配置")
     
     reader.close()

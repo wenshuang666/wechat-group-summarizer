@@ -1,112 +1,102 @@
-# 微信本地群聊消息总结器
+# WeChat Group Summarizer
 
-基于微信 Windows 版（XWeChatFiles）本地数据库的群聊消息读取与智能总结工具。
+> 微信数据库读取 + 消息总结工具，支持 GenericAgent 自动配置。
 
-## 功能
+## 快速开始
 
-- 🔓 **数据库解密**: 自动读取 sqlcipher 加密的数据库文件
-- 📊 **群聊总结**: 提取最近 N 条消息，发送给 LLM 生成中文摘要
-- 🖼️ **图片 OCR**: 自动提取群聊图片中的文字内容
-- 📄 **文档解析**: 自动读取群聊分享的 docx/pdf/md/txt 文件内容
-- 🤖 **Bot 集成**: 已对接微信机器人，支持 `/summary <群名>` 指令
+### 方式一：GA 用户（推荐）
 
-## 技术栈
+如果你正在使用 [GenericAgent](https://github.com/...)：
 
-- `sqlcipher3` - 数据库解密
-- `zstandard` - 消息内容 zstd 解压
-- `rapidocr-onnxruntime` - 本地图片 OCR（无需联网）
-- `python-docx` - Word 文档解析
-- `PyMuPDF` / `pymupdf4llm` - PDF 解析
+```bash
+# 1. 克隆项目到 GA 的 temp 目录
+git clone https://github.com/wenshuang666/wechat-group-summarizer.git
+
+# 2. 让 GA 自动配置
+# 对 GA 说："请按照 ga_sop/wechat_summary_setup.md 帮我配置微信消息总结"
+```
+
+GA 会自动完成：路径发现 → 密钥提取 → 依赖安装 → 测试连接。
+
+### 方式二：手动配置
+
+```bash
+# 1. 克隆
+pip install -r requirements.txt
+
+# 2. 设置环境变量
+set WECHAT_DB_DIR=C:\Users\<用户名>\Documents\xwechat_files\<wxid>_<hash>\db_storage
+set WECHAT_KEYS_FILE=.\wechat_keys.json
+
+# 3. 准备密钥文件（手动提取或参考社区方法）
+# wechat_keys.json 格式：
+# {
+#   "message_0": "32位十六进制密钥",
+#   "contact_0": "32位十六进制密钥"
+# }
+
+# 4. 运行
+python -c "from wechat_db_reader import WeChatDBReader; r = WeChatDBReader(); print(r.list_groups())"
+```
 
 ## 项目结构
 
 ```
-├── wechat_db_reader.py          # 核心：DB 读取 + 消息解析
-├── wechat_media_extractor.py    # 媒体提取：图片 OCR + 文档解析
-├── wechatapp.py                 # Bot 入口：/summary 指令处理
-└── wechat_keys.json             # 数据库密钥（需自行提取）
+wechat-group-summarizer/
+├── wechat_db_reader.py          # 核心：微信数据库读取
+├── wechat_media_extractor.py    # 媒体提取（图片 OCR、文档解析）
+├── requirements.txt             # 依赖
+├── ga_sop/
+│   └── wechat_summary_setup.md  # GA 自动配置 SOP
+└── README.md                    # 本文件
 ```
 
-## 使用方法
+## 核心功能
 
-### 1. 环境准备
+- **自动发现群聊**：无需手动配置 `group_map.json`，自动扫描所有 `Msg_*` 表
+- **zstd 解压**：解析微信消息内容的压缩格式
+- **媒体提取**：图片 OCR（rapidocr）、文档解析（docx/pdf/md/txt）
+- **灵活配置**：通过环境变量或参数传入路径和密钥
 
-```bash
-pip install sqlcipher3 zstandard rapidocr-onnxruntime python-docx pymupdf pymupdf4llm
-```
+## 环境变量
 
-### 2. 配置路径
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `WECHAT_DB_DIR` | 微信 db_storage 根目录 | `PLEASE_SET_YOUR_DB_DIR` |
+| `WECHAT_KEYS_FILE` | 密钥 JSON 文件路径 | `./wechat_keys.json` |
+| `WECHAT_GROUP_MAP` | 群聊映射文件路径（可选） | `./group_map.json` |
 
-设置环境变量指向你的微信数据目录：
-
-```bash
-# Windows
-set WECHAT_DB_DIR=C:\Users\<用户名>\Documents\xwechat_files\<wxid>_<hash>\db_storage
-set WECHAT_MSG_DIR=C:\Users\<用户名>\Documents\xwechat_files\<wxid>_<hash>\msg
-```
-
-或在代码中直接修改 `wechat_db_reader.py` 和 `wechat_media_extractor.py` 中的路径。
-
-### 3. 提取数据库密钥
-
-需要先从微信进程内存中提取 sqlcipher 密钥，保存为 `wechat_keys.json`：
-
-```json
-{
-  "message_0.db": "0x01,0x02,...",
-  "message_1.db": "..."
-}
-```
-
-### 4. 运行
+## 使用示例
 
 ```python
-from wechat_db_reader import get_group_summary_text
+from wechat_db_reader import WeChatDBReader
 
-# 获取群聊总结文本（自动包含图片OCR和文档内容）
-text = get_group_summary_text("群聊名称", limit=100, include_media=True)
-print(text)
+reader = WeChatDBReader()
+
+# 发现所有群聊
+groups = reader.list_groups()
+print(groups)
+
+# 读取消息（支持模糊匹配群名）
+msgs = reader.get_group_messages("GenericAgent", limit=100)
+for m in msgs:
+    print(f"[{m['time']}] {m['sender_name']}: {m['content']}")
+
+reader.close()
 ```
 
-## 消息类型支持
+## 依赖
 
-| 类型 | 显示 | 媒体提取 |
-|------|------|----------|
-| 文本 | ✅ | - |
-| 图片 | ✅ | OCR 提取文字 |
-| 文件/文档 | ✅ | 解析 docx/pdf/md/txt |
-| 表情 | ✅ | - |
-| 语音 | ✅ | - |
-| 视频 | ✅ | - |
-| 链接 | ✅ | - |
-| 应用消息 | ✅ | - |
-| 拍一拍 | ✅ | - |
-
-## 开发方法论：Agent 辅助项目迁移
-
-本项目最初是在 **GenericAgent** 框架内从零开始开发的。核心开发流程如下：
-
-1. **在 Agent 框架内迭代** —— 利用 GenericAgent 的浏览器控制、代码执行、文件操作等能力，快速验证微信 DB 解密、zstd 解压、媒体提取等技术方案。
-2. **渐进式验证** —— 每个模块（DB 读取 → zstd 解析 → 图片 OCR → 文档解析）都在 Agent 对话中独立验证后再整合。
-3. **脱敏与拆分** —— 功能成熟后，移除框架依赖，清理敏感路径和 wxid，最终拆分为独立仓库。
-4. **社区回馈** —— 将逆向经验和接口发现整理为文档，分享给同样对微信本地数据感兴趣的开发者。
-
-**启示**：一个强大的 Agent 框架不仅是自动化工具，更是**项目孵化器**。你可以在对话中快速试错、验证技术路线，待功能稳定后将其迁移为独立项目。这种方式显著降低了开发门槛，尤其适合涉及逆向工程、多步骤数据处理的复杂任务。
-
-## 关键发现
-
-1. **zstd 压缩**: 非文本消息内容使用 zstd 压缩（魔数 `28 b5 2f fd`），解压后得到 XML 元数据
-2. **本地文件关联**: 图片通过 `local_id` 关联 `msg/cache/` 目录；文档通过文件名关联 `msg/file/` 目录
-3. **消息类型映射**: `type=3` 图片, `type=49` 文件, `type=47` 表情, `type=1` 文本
-
-## Acknowledgments
-
-本项目在开发过程中得到了 [GenericAgent](https://github.com/lsdefine/GenericAgent) 框架的支持。GenericAgent 提供了强大的系统级操作能力和 AI 辅助开发环境，显著加速了本项目的开发进程。
+- `sqlcipher3` - 加密数据库连接
+- `zstandard` - zstd 解压
+- `rapidocr_onnxruntime` - 图片 OCR（可选）
+- `python-docx` - Word 文档解析（可选）
+- `pymupdf` - PDF 解析（可选）
 
 ## 免责声明
 
-本项目仅供学习和研究使用。请遵守相关法律法规，尊重用户隐私。使用本工具需获得相关群聊成员的知情同意。
+本项目仅供学习研究使用。使用本项目需遵守相关法律法规和微信用户协议。开发者不对任何滥用行为负责。
 
 ## License
 
-MIT License
+MIT
