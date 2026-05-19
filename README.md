@@ -1,6 +1,6 @@
 # WeChat Group Summarizer
 
-> 微信数据库读取 + 消息总结工具，专为 [GenericAgent](https://github.com/...) 用户设计。
+> 微信数据库读取 + 消息总结工具，专为 [GenericAgent](https://github.com/lsdefine/GenericAgent#chinese) 用户设计。
 
 ## 快速开始
 
