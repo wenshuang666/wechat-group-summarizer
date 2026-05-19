@@ -1,12 +1,8 @@
 # WeChat Group Summarizer
 
-> 微信数据库读取 + 消息总结工具，支持 GenericAgent 自动配置。
+> 微信数据库读取 + 消息总结工具，专为 [GenericAgent](https://github.com/...) 用户设计。
 
 ## 快速开始
-
-### 方式一：GA 用户（推荐）
-
-如果你正在使用 [GenericAgent](https://github.com/...)：
 
 ```bash
 # 1. 克隆项目到 GA 的 temp 目录
@@ -17,27 +13,6 @@ git clone https://github.com/wenshuang666/wechat-group-summarizer.git
 ```
 
 GA 会自动完成：路径发现 → 密钥提取 → 依赖安装 → 测试连接。
-
-### 方式二：手动配置
-
-```bash
-# 1. 克隆
-pip install -r requirements.txt
-
-# 2. 设置环境变量
-set WECHAT_DB_DIR=C:\Users\<用户名>\Documents\xwechat_files\<wxid>_<hash>\db_storage
-set WECHAT_KEYS_FILE=.\wechat_keys.json
-
-# 3. 准备密钥文件（手动提取或参考社区方法）
-# wechat_keys.json 格式：
-# {
-#   "message_0": "32位十六进制密钥",
-#   "contact_0": "32位十六进制密钥"
-# }
-
-# 4. 运行
-python -c "from wechat_db_reader import WeChatDBReader; r = WeChatDBReader(); print(r.list_groups())"
-```
 
 ## 项目结构
 
@@ -92,6 +67,10 @@ reader.close()
 - `rapidocr_onnxruntime` - 图片 OCR（可选）
 - `python-docx` - Word 文档解析（可选）
 - `pymupdf` - PDF 解析（可选）
+
+## 致谢
+
+本项目的设计和实现离不开 **[GenericAgent](https://github.com/...)** 框架的支持。GA 的自主执行能力（进程内存扫描、文件系统自动发现、代码自动执行）让普通用户无需手动配置即可享受微信消息总结功能。感谢 GA 团队和所有开源贡献者！
 
 ## 免责声明
 
