@@ -88,6 +88,10 @@ print(text)
 2. **本地文件关联**: 图片通过 `local_id` 关联 `msg/cache/` 目录；文档通过文件名关联 `msg/file/` 目录
 3. **消息类型映射**: `type=3` 图片, `type=49` 文件, `type=47` 表情, `type=1` 文本
 
+## Acknowledgments
+
+本项目在开发过程中得到了 [GenericAgent](https://github.com/lsdefine/GenericAgent) 框架的支持。GenericAgent 提供了强大的系统级操作能力和 AI 辅助开发环境，显著加速了本项目的开发进程。
+
 ## 免责声明
 
 本项目仅供学习和研究使用。请遵守相关法律法规，尊重用户隐私。使用本工具需获得相关群聊成员的知情同意。
